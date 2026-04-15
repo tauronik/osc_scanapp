@@ -353,6 +353,55 @@ if ($save && !$debug) {
         body#like { background: #008080; }      /* Teal for press/complimentary */
         body#scanning { background: #333; }     /* Dark gray while scanning */
         
+        /* Location Header - Top most, clickable to edit */
+        #location-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: #2c3e50;
+            padding: 10px 15px;
+            text-align: center;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        #location-header:hover {
+            background-color: #34495e;
+        }
+
+        #location-display {
+            pointer-events: none; /* Let clicks pass to parent */
+        }
+
+        #location-input {
+            display: none;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.5);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 1rem;
+            width: 150px;
+            text-align: center;
+        }
+
+        #location-input:focus {
+            outline: 2px solid #27ae60;
+            background: rgba(255,255,255,0.3);
+        }
+
+        .edit-icon {
+            font-size: 0.8rem;
+            opacity: 0.7;
+        }
+        
         /* Video container for camera feed */
         #video-container {
             position: fixed;
@@ -578,6 +627,13 @@ if ($save && !$debug) {
 </head>
 
 <body id="<?php echo !empty($class) ? $class : 'scanning'; ?>">
+    <!-- Location Header (Top) - Clickable to edit, stored in device cookie -->
+    <div id="location-header" onclick="editLocation()">
+        <span id="location-display">Location: <?php echo htmlspecialchars($location); ?></span>
+        <input type="text" id="location-input" value="<?php echo htmlspecialchars($location); ?>" placeholder="Enter location" onblur="saveLocation()" onkeydown="handleLocationKey(event)">
+        <span class="edit-icon">✏️</span>
+    </div>
+    
     <!-- Camera video element -->
     <div id="video-container">
         <video id="video-element" autoplay playsinline muted></video>
@@ -591,13 +647,8 @@ if ($save && !$debug) {
         <?php 
         if (!empty($class)) {
             echo $message;
-            // Only show manual retry button for failures, success auto-resumes
-            if ($class === 'fail' || $class === 'warning') {
-                echo '<div><a href="' . htmlspecialchars($_SERVER['PHP_SELF']) . '?location=' . urlencode($location) . '" id="new" rel="nofollow">' . TEXT_SCAN_NEXT . '</a></div>';
-            } else {
-                // For success/extra/like, show temporary message that auto-resumes
-                echo '<div style="margin-top:20px;font-size:0.6em">Scanning will resume automatically...</div>';
-            }
+            // ALWAYS show SCAN NEXT button for all cases (success, fail, warning, extra, like)
+            echo '<div><a href="' . htmlspecialchars($_SERVER['PHP_SELF']) . '?location=' . urlencode($location) . '" id="new" rel="nofollow">' . TEXT_SCAN_NEXT . '</a></div>';
         } else {
             echo '<p>' . TEXT_START_SCANNING . '</p>';
         }
@@ -629,6 +680,98 @@ if ($save && !$debug) {
             var locationParam = '<?php echo addslashes($location); ?>';
             var debugMode = <?php echo $debug ? 'true' : 'false'; ?>;
             var currentUrl = window.location.protocol + '//' + window.location.host + '<?php echo DIR_WS_HTTP_CATALOG; ?>' + 'scanapp.php';
+            
+            /**
+             * Cookie functions for device-based location storage
+             */
+            function setCookie(name, value, days) {
+                var expires = "";
+                if (days) {
+                    var date = new Date();
+                    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                    expires = "; expires=" + date.toUTCString();
+                }
+                document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Lax";
+            }
+            
+            function getCookie(name) {
+                var nameEQ = name + "=";
+                var ca = document.cookie.split(';');
+                for(var i = 0; i < ca.length; i++) {
+                    var c = ca[i];
+                    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+                    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+                }
+                return null;
+            }
+            
+            /**
+             * Location handling functions
+             */
+            function editLocation() {
+                var display = document.getElementById('location-display');
+                var input = document.getElementById('location-input');
+                var icon = document.querySelector('.edit-icon');
+                
+                display.style.display = 'none';
+                icon.style.display = 'none';
+                input.style.display = 'inline-block';
+                input.focus();
+                input.select();
+            }
+            
+            function handleLocationKey(event) {
+                if (event.key === 'Enter') {
+                    saveLocation();
+                } else if (event.key === 'Escape') {
+                    cancelEditLocation();
+                }
+            }
+            
+            function saveLocation() {
+                var input = document.getElementById('location-input');
+                var newValue = input.value.trim();
+                
+                if (newValue && newValue !== locationParam) {
+                    locationParam = newValue;
+                    setCookie('scanner_location', locationParam, 365); // Store for 1 year
+                    
+                    // Update display
+                    document.getElementById('location-display').textContent = 'Location: ' + locationParam;
+                    
+                    // Hide input, show display
+                    cancelEditLocation();
+                    
+                    // Update URL without reload
+                    var newUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + '?location=' + encodeURIComponent(locationParam);
+                    window.history.replaceState({path: newUrl}, '', newUrl);
+                    
+                    if (debugMode) console.log('Location saved to cookie:', locationParam);
+                } else {
+                    cancelEditLocation();
+                }
+            }
+            
+            function cancelEditLocation() {
+                var display = document.getElementById('location-display');
+                var input = document.getElementById('location-input');
+                var icon = document.querySelector('.edit-icon');
+                
+                input.style.display = 'none';
+                display.style.display = 'inline';
+                icon.style.display = 'inline';
+                input.value = locationParam;
+            }
+            
+            // Initialize location from cookie on load if not already set from PHP
+            var cookieLocation = getCookie('scanner_location');
+            if (cookieLocation && cookieLocation !== locationParam) {
+                // Cookie takes precedence, but PHP already rendered the initial value
+                // We'll update it via JS
+                locationParam = cookieLocation;
+                document.getElementById('location-display').textContent = 'Location: ' + locationParam;
+                document.getElementById('location-input').value = locationParam;
+            }
             
             // DOM Elements
             var videoElement = document.getElementById('video-element');
@@ -822,29 +965,6 @@ if ($save && !$debug) {
                 }, 500);
             }
             
-            /**
-             * Resume scanning immediately (for successful scans)
-             */
-            function resumeScanningAuto() {
-                scanCooldown = false;
-                lastScannedCode = null;
-                
-                // Reset state for new scan
-                isScanning = false;
-                document.body.id = 'scanning';
-                
-                // Show scanning UI elements
-                videoContainer.style.display = 'block';
-                scanOverlay.style.display = 'block';
-                startBtn.classList.add('hidden');
-                stopBtn.classList.remove('hidden');
-                loading.style.display = 'none';
-                messageDiv.innerHTML = '<p style="font-size:0.6em">Position barcode within frame</p>';
-                
-                // Start scanning immediately without delay
-                startScanning();
-            }
-            
             // Event Listeners
             startBtn.addEventListener('click', function(e) {
                 e.preventDefault();
@@ -862,20 +982,20 @@ if ($save && !$debug) {
                 
                 // If we have a result (not 'scanning'), show it and prepare for next scan
                 if (bodyId && bodyId !== 'scanning') {
-                    // Play appropriate sound
+                    // Play appropriate sound based on result
                     if (bodyId === 'success' || bodyId === 'extra' || bodyId === 'like') {
                         playSound('success');
-                        // For successful scans, auto-resume immediately
-                        resumeScanningAuto();
                     } else if (bodyId === 'fail' || bodyId === 'warning') {
                         playSound('error');
-                        // For failures, wait for user to click "Scan Next"
-                        var scanNextLink = document.getElementById('new');
-                        if (scanNextLink) {
-                            scanNextLink.addEventListener('click', function() {
-                                resetScanner();
-                            });
-                        }
+                    }
+                    
+                    // Setup SCAN NEXT button click handler for ALL cases
+                    var scanNextLink = document.getElementById('new');
+                    if (scanNextLink) {
+                        scanNextLink.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            resetScanner();
+                        });
                     }
                 }
             });
