@@ -1,1 +1,9 @@
-Nothing should be ignored in this case, as the changes only include source/config files (README.md and QWEN.md) without any build artifacts, dependencies, or temporary files.
+```php
+vendor/
+composer.lock
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+```
