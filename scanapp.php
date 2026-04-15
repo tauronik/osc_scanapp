@@ -527,6 +527,10 @@ if ($save && !$debug) {
         body#extra #new:active,
         body#extra #new:focus { color: #2E8B57; }
         
+        body#like #new:hover,
+        body#like #new:active,
+        body#like #new:focus { color: #008080; }
+        
         /* Loading indicator */
         #loading {
             position: fixed;
@@ -587,7 +591,13 @@ if ($save && !$debug) {
         <?php 
         if (!empty($class)) {
             echo $message;
-            echo '<div><a href="' . htmlspecialchars($_SERVER['PHP_SELF']) . '?location=' . urlencode($location) . '" id="new" rel="nofollow">' . TEXT_SCAN_NEXT . '</a></div>';
+            // Only show manual retry button for failures, success auto-resumes
+            if ($class === 'fail' || $class === 'warning') {
+                echo '<div><a href="' . htmlspecialchars($_SERVER['PHP_SELF']) . '?location=' . urlencode($location) . '" id="new" rel="nofollow">' . TEXT_SCAN_NEXT . '</a></div>';
+            } else {
+                // For success/extra/like, show temporary message that auto-resumes
+                echo '<div style="margin-top:20px;font-size:0.6em">Scanning will resume automatically...</div>';
+            }
         } else {
             echo '<p>' . TEXT_START_SCANNING . '</p>';
         }
@@ -716,7 +726,10 @@ if ($save && !$debug) {
             function startScanning() {
                 if (!initCodeReader()) return;
                 
-                loading.style.display = 'block';
+                // Don't show loading again if already scanning (for auto-resume)
+                if (!isScanning) {
+                    loading.style.display = 'block';
+                }
                 
                 // Request camera access
                 codeReader.decodeFromVideoDevice(null, videoElement, function(result, err) {
@@ -803,10 +816,33 @@ if ($save && !$debug) {
                 lastScannedCode = null;
                 loading.style.display = 'none';
                 
-                // Auto-start scanning after showing result
+                // Auto-start scanning after short delay
                 setTimeout(function() {
                     startScanning();
-                }, 1000);
+                }, 500);
+            }
+            
+            /**
+             * Resume scanning immediately (for successful scans)
+             */
+            function resumeScanningAuto() {
+                scanCooldown = false;
+                lastScannedCode = null;
+                
+                // Reset state for new scan
+                isScanning = false;
+                document.body.id = 'scanning';
+                
+                // Show scanning UI elements
+                videoContainer.style.display = 'block';
+                scanOverlay.style.display = 'block';
+                startBtn.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+                loading.style.display = 'none';
+                messageDiv.innerHTML = '<p style="font-size:0.6em">Position barcode within frame</p>';
+                
+                // Start scanning immediately without delay
+                startScanning();
             }
             
             // Event Listeners
@@ -829,16 +865,17 @@ if ($save && !$debug) {
                     // Play appropriate sound
                     if (bodyId === 'success' || bodyId === 'extra' || bodyId === 'like') {
                         playSound('success');
+                        // For successful scans, auto-resume immediately
+                        resumeScanningAuto();
                     } else if (bodyId === 'fail' || bodyId === 'warning') {
                         playSound('error');
-                    }
-                    
-                    // Auto-reset after delay if user hasn't clicked "Scan Next"
-                    var scanNextLink = document.getElementById('new');
-                    if (scanNextLink) {
-                        scanNextLink.addEventListener('click', function() {
-                            resetScanner();
-                        });
+                        // For failures, wait for user to click "Scan Next"
+                        var scanNextLink = document.getElementById('new');
+                        if (scanNextLink) {
+                            scanNextLink.addEventListener('click', function() {
+                                resetScanner();
+                            });
+                        }
                     }
                 }
             });
@@ -853,13 +890,7 @@ if ($save && !$debug) {
                     // Optionally resume scanning when tab becomes visible
                 }
             });
-            
-            // Initial state check
-            if (!<?php echo empty($class) ? 'true' : 'false'; ?>) {
-                // We have a result, don't auto-start scanning
-                stopScanning(true);
-            }
-            
+
         })();
     </script>
 </body>
