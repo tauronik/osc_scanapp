@@ -1,8 +1,8 @@
 <?php
 /*
     scanapp.php - HTML5 Camera-based Ticket Scanner for osConcert
-    @author: osConcert Team
-    @version: 1.2.0
+    @author: m.schatz@tauronik.de
+    @version: 1.2.1
     
     This is a mobile-first ticket scanning application that uses:
     - HTML5 getUserMedia API for camera access
