@@ -345,15 +345,15 @@ if ($save && !$debug) {
             margin: 0;
             padding: 0;
             font-family: Arial, Helvetica, sans-serif;
-            font-size: 12px;
+            font-size: 14px;
             color: #FFF;
         }
         
         /* Status-based background colors */
-        body#success { background: #0C0; }      /* Green for valid tickets */
-        body#fail { background: #C00; }         /* Red for invalid/expired */
-        body#warning { background: #F60; }      /* Orange for already scanned */
-        body#extra { background: #2E8B57; }     /* Sea green for guest list */
+        body#success { background: #28a745; }      /* Green for valid tickets */
+        body#fail { background: #C61010; }         /* Red for invalid/expired */
+        body#warning { background: #FE7F2D; }      /* Orange for already scanned */
+        body#extra { background: #2E838C; }     /* Sea green for guest list */
         body#like { background: #008080; }      /* Teal for press/complimentary */
         body#scanning { background: #333; }     /* Dark gray while scanning */
         
