@@ -111,3 +111,12 @@ tox.ini
 coverage.xml
 htmlcov/
 .cov/
+/events_tickets__1776242334.pdf
+/includes/application_top.php
+/qr-code-door1.png
+/qr-code-door2.png
+/qr-code-door3.png
+/qr-code-door4.png
+/qr-codes-1-4.odt
+/qr-codes-1-4.pdf
+/roadmap.csv
