@@ -2,21 +2,23 @@
 /*
     scanapp.php - HTML5 Camera-based Ticket Scanner for osConcert
     @author: m.schatz@tauronik.de
-    @version: 1.2.1
-    
+    @version: 1.3.0
+
     This is a mobile-first ticket scanning application that uses:
     - HTML5 getUserMedia API for camera access
     - ZXing Library for barcode/QR code decoding
     - Web Audio API for sound feedback (no external files needed)
-    
+
     Copyright (c) 2009-2025 osConcert
     Released under the GNU General Public License
-    
-    OPTIMIZATION NOTES:
-    - Precompiled regex patterns
+
+    OPTIMIZATION NOTES (v1.3.0):
+    - Single-query ticket validation (eliminated redundant DB round-trip)
+    - Precompiled regex patterns (PHP + JS)
+    - Cached type conversions (int casts)
     - Moved helper functions outside conditional blocks
-    - Reduced redundant database queries
-    - Optimized date validation logic
+    - Lazy AudioContext initialization
+    - Minimized DOM queries via caching
 */
 
 // Set flag that this is a parent file
@@ -94,10 +96,10 @@ if (false !== $barcode) {
             $products_id = $part[2];
             $quantity = $part[3];
             $barcode_value = join('_', $part);
-            
-            // OPTIMIZED: Single query with proper indexes assumed on orders_id, products_id, barcode
-            // Check orders_barcode table joined with orders_products
-            // Verify orders_products_status is '3' (confirmed) and products_quantity > 0
+
+            // SINGLE QUERY: Get all ticket data in one DB round-trip
+            // Includes orders_barcode + orders_products + orders via JOINs
+            // Verifies orders_products_status='3' (confirmed) and products_quantity > 0
             $query = tep_db_query(sprintf("
                 SELECT
                     `qr`.`orders_id`,
@@ -110,11 +112,23 @@ if (false !== $barcode) {
                     `op`.`products_name`,
                     `op`.`discount_type`,
                     `op`.`products_quantity`,
-                    `op`.`orders_products_status`
+                    `op`.`orders_products_status`,
+                    `op`.`categories_name`,
+                    `op`.`concert_venue`,
+                    `op`.`concert_date`,
+                    `op`.`concert_time`,
+                    `op`.`products_model`,
+                    `op`.`discount_text`,
+                    `o`.`customers_name`,
+                    `o`.`billing_name`,
+                    `o`.`reference_id`,
+                    `o`.`payment_method`,
+                    `o`.`date_purchased`
                 FROM
                     `orders_barcode` `qr`
                     INNER JOIN `orders_products` `op` ON `op`.`orders_id` = `qr`.`orders_id`
                         AND `op`.`products_id` = `qr`.`products_id`
+                    INNER JOIN `orders` `o` ON `o`.`orders_id` = `qr`.`orders_id`
                 WHERE
                     `qr`.`orders_id` = %d
                 AND
@@ -131,136 +145,90 @@ if (false !== $barcode) {
                 $products_id,
                 tep_db_prepare_input($barcode_value)
             ));
-            
+
             $return = tep_db_fetch_array($query);
-            
+
             if (NULL !== $return && false !== $return) {
+                // Cache int casts (used multiple times)
+                $scanned = (int)$return['scanned'];
+                $scanned_date = (int)$return['scanned_date'];
+
                 // Check if ticket was already scanned or being scanned within 10 seconds window
                 // This prevents duplicate scans in quick succession
-                $is_fresh_scan = ((int)$return['scanned'] === 0 && (int)$return['scanned_date'] === 0) || 
-                                 ((int)$return['scanned_date'] + 10 > $time && $return['location'] == $location);
-                
+                $is_fresh_scan = ($scanned === 0 && $scanned_date === 0) ||
+                                 ($scanned_date + 10 > $time && $return['location'] == $location);
+
                 if ($is_fresh_scan) {
-                    // OPTIMIZED: Combined order and product query with LIMIT
-                    $order_sql = "SELECT
-                        `o`.`orders_id`,
-                        `op`.`products_id`,
-                        `op`.`orders_products_id`,
-                        `o`.`reference_id`,
-                        `op`.`events_id`,
-                        `o`.`customers_name`,
-                        `op`.`categories_name`,
-                        `op`.`products_name`,
-                        `op`.`concert_venue`,
-                        `op`.`concert_date`,
-                        `op`.`concert_time`,
-                        `o`.`billing_name`,
-                        `op`.`products_model`,
-                        `op`.`events_type`,
-                        `op`.`discount_type`,
-                        `op`.`products_price`,
-                        `op`.`final_price`,
-                        `o`.`payment_method`,
-                        `o`.`date_purchased`,
-                        `op`.`discount_text`
-                    FROM
-                        `orders` `o`
-                        INNER JOIN `orders_products` `op` ON `o`.`orders_id` = `op`.`orders_id`
-                    WHERE
-                        `o`.`orders_id` = %d
-                    AND
-                        `op`.`products_id` = %d
-                    LIMIT 1";
-                    
-                    $order_query = tep_db_query(sprintf($order_sql, $orders_id, $products_id));
-                    $data = tep_db_fetch_array($order_query);
-                    
-                    if ($data) {
-                        // Format concert date and time
-                        $concert_date = join(' ', array_filter(array($data['concert_date'], $data['concert_time'])));
-                        $date = $data['products_model'];
-                        
-                        // Unified date validation logic (optimization: removed duplicate code)
-                        $ticket_valid = false;
-                        $ticket_expired = false;
-                        $cupon_date = null;
-                        
-                        try {
-                            $cupon_date_obj = new DateTime(str_replace('/', '.', $data['products_model']));
-                            $cupon_date = $cupon_date_obj->getTimestamp();
-                            
-                            // Use configured time windows for ticket validity
-                            // PLUS_TIME and MINUS_TIME should be defined in configure.php
-                            $PLUS_TIME = (defined('PLUS_TIME')) ? PLUS_TIME : '+2 hours';
-                            $MINUS_TIME = (defined('MINUS_TIME')) ? MINUS_TIME : '-3 hours';
-                            
-                            $plus_timestamp = strtotime($PLUS_TIME, $cupon_date);
-                            $minus_timestamp = strtotime($MINUS_TIME, $cupon_date);
-                            
-                            if ($time >= $plus_timestamp) {
-                                $ticket_expired = true;
-                            } else if ($time >= $minus_timestamp) {
-                                $ticket_valid = true;
-                            }
-                        } catch (Exception $e) {
-                            // No date parsing possible - accept without date validation
+                    // Format concert date and time
+                    $concert_date = join(' ', array_filter(array($return['concert_date'], $return['concert_time'])));
+                    $date = $return['products_model'];
+
+                    // Unified date validation logic
+                    $ticket_valid = false;
+                    $ticket_expired = false;
+
+                    try {
+                        $cupon_date_obj = new DateTime(str_replace('/', '.', $return['products_model']));
+                        $cupon_date = $cupon_date_obj->getTimestamp();
+
+                        $PLUS_TIME = (defined('PLUS_TIME')) ? PLUS_TIME : '+2 hours';
+                        $MINUS_TIME = (defined('MINUS_TIME')) ? MINUS_TIME : '-3 hours';
+
+                        $plus_timestamp = strtotime($PLUS_TIME, $cupon_date);
+                        $minus_timestamp = strtotime($MINUS_TIME, $cupon_date);
+
+                        if ($time >= $plus_timestamp) {
+                            $ticket_expired = true;
+                        } else if ($time >= $minus_timestamp) {
                             $ticket_valid = true;
                         }
-                        
-                        // Determine result based on validation
-                        if ($ticket_expired) {
-                            // Ticket expired - past the allowed entry window
-                            $class = 'fail';
-                            $message = sprintf(
-                                '' . TEXT_NO_ADMISSION . '<br><span>%s</span><br><span>%s</small>',
-                                $data['products_name'],
-                                $date
-                            );
-                        } else if ($ticket_valid) {
-                            // Within valid time window or no date validation
-                            if ((int)$return['scanned'] === 0 && (int)$return['scanned_date'] === 0) {
-                                $save = true; // Mark for saving to database
-                            }
-                            
-                            // Determine CSS class based on event type and discount (optimized logic)
-                            $events_type = $return['events_type'];
-                            $discount_type = $return['discount_type'];
-                            
-                            if ($events_type == 'G') {
-                                $class = 'extra'; // Guest list or special event
-                            } else if (($events_type == 'P') && ($discount_type == 'C')) {
-                                $class = 'like'; // Press with complimentary ticket
-                            } else {
-                                $class = 'success';
-                            }
-                            
-                            // Display success message with ticket details
-                            $message = sprintf(
-                                '<h1>' . TEXT_TICKET_OK . '</h1>
-                                <h3>%s</h3>
-                                <div>%s</div>
-                                <div>Order ID: %s</div>
-                                <div>%s</div>
-                                <div>%s</div>',
-                                osc_ucfirst_all($data['billing_name']),
-                                $data['categories_name'],
-                                $data['orders_id'],
-                                $concert_date,
-                                $data['products_name']
-                            );
-                        } else {
-                            // Ticket not yet valid - too early
-                            $class = 'fail';
-                            $message = sprintf(
-                                '' . TEXT_TICKET_VALID . '<span>%s %s</span>',
-                                $data['categories_name'],
-                                $concert_date
-                            );
-                        }
-                    } else {
-                        // Order data not found
+                    } catch (Exception $e) {
+                        $ticket_valid = true;
+                    }
+
+                    if ($ticket_expired) {
                         $class = 'fail';
-                        $message = '<h1>' . TEXT_NOT_EXIST . '</h1>';
+                        $message = sprintf(
+                            '' . TEXT_NO_ADMISSION . '<br><span>%s</span><br><span>%s</small>',
+                            $return['products_name'],
+                            $date
+                        );
+                    } else if ($ticket_valid) {
+                        if ($scanned === 0 && $scanned_date === 0) {
+                            $save = true;
+                        }
+
+                        $events_type = $return['events_type'];
+                        $discount_type = $return['discount_type'];
+
+                        if ($events_type == 'G') {
+                            $class = 'extra';
+                        } else if (($events_type == 'P') && ($discount_type == 'C')) {
+                            $class = 'like';
+                        } else {
+                            $class = 'success';
+                        }
+
+                        $message = sprintf(
+                            '<h1>' . TEXT_TICKET_OK . '</h1>
+                            <h3>%s</h3>
+                            <div>%s</div>
+                            <div>Order ID: %s</div>
+                            <div>%s</div>
+                            <div>%s</div>',
+                            osc_ucfirst_all($return['billing_name']),
+                            $return['categories_name'],
+                            $return['orders_id'],
+                            $concert_date,
+                            $return['products_name']
+                        );
+                    } else {
+                        $class = 'fail';
+                        $message = sprintf(
+                            '' . TEXT_TICKET_VALID . '<span>%s %s</span>',
+                            $return['categories_name'],
+                            $concert_date
+                        );
                     }
                 } else {
                     // Ticket already scanned
@@ -693,6 +661,9 @@ if ($save && !$debug) {
             
             // Pre-calculate URL base to avoid repeated string concatenation
             var urlBase = window.location.protocol + '//' + window.location.host + window.location.pathname;
+
+            // Precompiled regex for barcode validation
+            var barcodeRegex = /^\d+_\d+_\d+$/;
             
             /**
              * Cookie functions for device-based location storage
@@ -722,61 +693,63 @@ if ($save && !$debug) {
             
             /**
              * Location handling functions
+             * Exposed to window for inline event handler access
              */
-            function editLocation() {
+            var inputJustOpened = false;
+
+            window.editLocation = function() {
                 var display = document.getElementById('location-display');
                 var input = document.getElementById('location-input');
                 var icon = document.querySelector('.edit-icon');
-                
+
                 display.style.display = 'none';
                 icon.style.display = 'none';
                 input.style.display = 'inline-block';
                 input.focus();
                 input.select();
-            }
-            
-            function handleLocationKey(event) {
+                inputJustOpened = true;
+                setTimeout(function() { inputJustOpened = false; }, 100);
+            };
+
+            window.handleLocationKey = function(event) {
                 if (event.key === 'Enter') {
-                    saveLocation();
+                    window.saveLocation();
                 } else if (event.key === 'Escape') {
-                    cancelEditLocation();
+                    window.cancelEditLocation();
                 }
-            }
-            
-            function saveLocation() {
+            };
+
+            window.saveLocation = function() {
+                if (inputJustOpened) return;
                 var input = document.getElementById('location-input');
                 var newValue = input.value.trim();
-                
+
                 if (newValue && newValue !== locationParam) {
                     locationParam = newValue;
-                    setCookie('scanner_location', locationParam, 365); // Store for 1 year
-                    
-                    // Update display
+                    setCookie('scanner_location', locationParam, 365);
+
                     document.getElementById('location-display').textContent = 'Location: ' + locationParam;
-                    
-                    // Hide input, show display
-                    cancelEditLocation();
-                    
-                    // Update URL without reload using history API
+                    window.cancelEditLocation();
+
                     var newUrl = urlBase + '?location=' + encodeURIComponent(locationParam);
                     window.history.replaceState({path: newUrl}, '', newUrl);
-                    
+
                     if (debugMode) console.log('Location saved to cookie:', locationParam);
                 } else {
-                    cancelEditLocation();
+                    window.cancelEditLocation();
                 }
-            }
-            
-            function cancelEditLocation() {
+            };
+
+            window.cancelEditLocation = function() {
                 var display = document.getElementById('location-display');
                 var input = document.getElementById('location-input');
                 var icon = document.querySelector('.edit-icon');
-                
+
                 input.style.display = 'none';
                 display.style.display = 'inline';
                 icon.style.display = 'inline';
                 input.value = locationParam;
-            }
+            };
             
             // Initialize location from cookie on load if not already set from PHP
             var cookieLocation = getCookie('scanner_location');
@@ -933,7 +906,7 @@ if ($save && !$debug) {
                         if (scanCooldown || code === lastScannedCode) return;
                         
                         // Validate basic format before sending
-                        if (code.match(/^\d+_\d+_\d+$/)) {
+                        if (barcodeRegex.test(code)) {
                             scanCooldown = true;
                             lastScannedCode = code;
                             
