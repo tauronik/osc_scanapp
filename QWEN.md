@@ -124,7 +124,20 @@ Setzen Sie `$debug = true;` in der PHP-Sektion, um detaillierte Fehlermeldungen 
 
 ---
 
-## 📝 Entwicklungshistorie
+## 📝 Versionshistorie
+
+### Version 1.5 - Konfigurierbare Sicherheitsmodi
+- Drei Sicherheitsmodi: `none`, `login` und numerische PIN
+- **none**: Direktzugriff ohne Authentifizierung (vertrauenswürdige Umgebungen)
+- **login**: Box-Office-Login mit E-Mail/Passwort (prüft country_id = 999)
+- **PIN**: 5-12 stellige statische PIN in scanapp.php konfiguriert
+- Konfigurierbar über `$security` Variable am Anfang der scanapp.php
+
+### Version 1.4 - PIN-Event-Zugriffskontrolle
+- 5-12 stellige PIN-Authentifizierung für Zugriffskontrolle
+- Vollbild-PIN-Modal beim ersten Zugriff
+- Event-Wechsel-Button (🔄) zum Wechseln der Events
+- Session-basierte PIN-Validierung (läuft ab wenn Browser geschlossen wird)
 
 ### Version 1.0 (Initiale Version)
 - Ersetzt pic2Shop PRO durch HTML5 Camera API

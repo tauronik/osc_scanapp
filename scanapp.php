@@ -2,7 +2,7 @@
 /*
     scanapp.php - HTML5 Camera-based Ticket Scanner for osConcert
     @author: m.schatz@tauronik.de
-    @version: 1.3.0
+    @version: 1.5.0
 
     This is a mobile-first ticket scanning application that uses:
     - HTML5 getUserMedia API for camera access
@@ -12,13 +12,12 @@
     Copyright (c) 2009-2025 osConcert
     Released under the GNU General Public License
 
-    OPTIMIZATION NOTES (v1.3.0):
-    - Single-query ticket validation (eliminated redundant DB round-trip)
-    - Precompiled regex patterns (PHP + JS)
-    - Cached type conversions (int casts)
-    - Moved helper functions outside conditional blocks
-    - Lazy AudioContext initialization
-    - Minimized DOM queries via caching
+    FEATURES (v1.5.0):
+    - Configurable security modes: none, login, or PIN
+    - Box office login authentication (country_id = 999)
+    - Static PIN authentication (5-12 digits)
+    - AJAX authentication with session management
+    - Mobile-optimized auth forms
 */
 
 // Set flag that this is a parent file
@@ -44,10 +43,45 @@ define('TEXT_CAMERA_ERROR', 'Unable to access camera. Please ensure camera permi
 $debug = false; // Set to true for debug mode, preserved from original scanner.php
 /** ENABLE DEBUG MODE **/
 
+/** SECURITY MODE **/
+// 'none'    - No security (direct access, for trusted environments)
+// 'login'   - Box office login required (email + password with country_id = 999)
+// Any other value - Treated as PIN (5-12 digits) for access
+$security = 'login';
+/** SECURITY MODE **/
+
 // Initialize response variables
 $class = '';
 $message = '' . TEXT_SCAN_TICKETS;
 $save = false;
+
+// Security check based on mode
+$security_authenticated = false;
+
+if ($security !== 'none') {
+    if ($security === 'login') {
+        // Login mode: Check box office session
+        if (isset($_SESSION['customer_id'])) {
+            // Verify customer has box office access (country_id = 999)
+            $check = tep_db_query("
+                SELECT 1
+                FROM address_book
+                WHERE customers_id = '" . (int)$_SESSION['customer_id'] . "'
+                AND entry_country_id = 999
+                LIMIT 1
+            ");
+            if (tep_db_num_rows($check) > 0) {
+                $security_authenticated = true;
+            }
+        }
+    } else {
+        // Numeric PIN mode: Check pin_authenticated session
+        $security_authenticated = isset($_SESSION['pin_authenticated']) && $_SESSION['pin_authenticated'] === true;
+    }
+} else {
+    // None mode: Always authenticated
+    $security_authenticated = true;
+}
 
 // Precompiled regex pattern for barcode validation (optimization: compile once)
 $barcode_pattern = '/(\d{1,11})_(\d{1,11})_(\d{1,11})/';
@@ -274,6 +308,106 @@ if ($save && !$debug) {
         $return['barcode_id']
     ));
 }
+
+// AJAX Authentication Endpoints
+if (isset($_GET['auth_action'])) {
+    header('Content-Type: application/json');
+
+    if ($_GET['auth_action'] === 'login') {
+        // Box office login
+        $email = filter_input(INPUT_GET, 'email', FILTER_SANITIZE_EMAIL);
+        $password = filter_input(INPUT_GET, 'password', FILTER_SANITIZE_STRING);
+
+        if (!$email || !$password) {
+            echo json_encode(['success' => false, 'error' => 'Email and password required']);
+            exit;
+        }
+
+        $check_customer_query = tep_db_query("
+            SELECT customers_id, customers_password, encryption_style
+            FROM " . TABLE_CUSTOMERS . "
+            WHERE is_blocked = 'N' AND customers_email_address = '" . tep_db_input($email) . "'
+            LIMIT 1
+        ");
+
+        if (tep_db_num_rows($check_customer_query) === 0) {
+            echo json_encode(['success' => false, 'error' => 'Login failed']);
+            exit;
+        }
+
+        $check_customer = tep_db_fetch_array($check_customer_query);
+
+        if (!tep_validate_password($password, $check_customer['customers_password'], $check_customer['encryption_style'])) {
+            echo json_encode(['success' => false, 'error' => 'Login failed']);
+            exit;
+        }
+
+        // Check box office access (country_id = 999)
+        $check_country_query = tep_db_query("
+            SELECT 1 FROM address_book
+            WHERE customers_id = '" . (int)$check_customer['customers_id'] . "'
+            AND entry_country_id = 999
+            LIMIT 1
+        ");
+
+        if (tep_db_num_rows($check_country_query) === 0) {
+            echo json_encode(['success' => false, 'error' => 'Access denied']);
+            exit;
+        }
+
+        $_SESSION['customer_id'] = (int)$check_customer['customers_id'];
+        echo json_encode(['success' => true, 'type' => 'login']);
+        exit;
+    }
+
+    if ($_GET['auth_action'] === 'pin') {
+        // PIN validation - compare against configured security value
+        $pin_raw = isset($_GET['pin']) ? trim($_GET['pin']) : '';
+        $pin = (int)$pin_raw;
+
+        // Accept PINs of 5-12 digits
+        if (!$pin || $pin < 10000 || $pin > 999999999999) {
+            echo json_encode(['success' => false, 'error' => 'Invalid PIN format']);
+            exit;
+        }
+
+        // Compare as strings for reliable comparison
+        $security_str = trim((string)$security);
+        if (strcmp($pin_raw, $security_str) === 0) {
+            $_SESSION['pin_authenticated'] = true;
+            echo json_encode(['success' => true, 'type' => 'pin']);
+        } else {
+            if ($debug) {
+                echo json_encode(['success' => false, 'error' => 'Debug: submitted=' . $pin_raw . ' expected=' . $security_str]);
+            } else {
+                echo json_encode(['success' => false, 'error' => 'Wrong PIN']);
+            }
+        }
+        exit;
+    }
+
+    echo json_encode(['success' => false, 'error' => 'Unknown action']);
+    exit;
+}
+
+// Logout/Clear Session
+if (isset($_GET['logout'])) {
+    if ($security === 'login') {
+        $_SESSION['customer_id'] = null;
+        unset($_SESSION['customer_id']);
+    } else {
+        $_SESSION['pin_authenticated'] = null;
+        unset($_SESSION['pin_authenticated']);
+    }
+    header('Location: ' . $_SERVER['PHP_SELF']);
+    exit;
+}
+
+// Check if authentication is required
+$auth_required = !$security_authenticated;
+
+// Determine auth mode for UI
+$auth_mode = ($security === 'login') ? 'login' : 'pin';
 
 ?>
 <!DOCTYPE html>
@@ -595,11 +729,159 @@ if ($save && !$debug) {
         
         /* Hide elements when not needed */
         .hidden { display: none !important; }
+
+        /* PIN Modal Styles */
+        #auth-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #auth-modal .auth-container {
+            text-align: center;
+            padding: 40px;
+        }
+
+        #auth-modal h2 {
+            margin: 0 0 10px 0;
+            font-size: 1.5em;
+        }
+
+        #auth-modal p {
+            margin: 0 0 20px 0;
+            font-size: 1em;
+            opacity: 0.8;
+        }
+
+        #auth-modal input {
+            display: block;
+            font-size: 1.2em;
+            text-align: center;
+            width: 250px;
+            padding: 12px 15px;
+            margin: 10px auto;
+            border: 2px solid #fff;
+            border-radius: 8px;
+            background: transparent;
+            color: #fff;
+            outline: none;
+        }
+
+        #auth-modal input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        #auth-modal input:focus {
+            border-color: #0f0;
+        }
+
+        #auth-modal input[type="password"],
+        #auth-modal input[type="email"] {
+            -webkit-text-security: text;
+        }
+
+        #auth-modal ~ #video-container,
+        #auth-modal ~ #scan-overlay,
+        #auth-modal ~ #controls,
+        #auth-modal ~ #message,
+        body:not([id="scanning"]) ~ #video-container,
+        body:not([id="scanning"]) ~ #scan-overlay,
+        body:not([id="scanning"]) ~ #controls {
+            display: none !important;
+        }
+
+        body:not([id="scanning"]) ~ #message {
+            display: none !important;
+        }
+
+        #auth-modal {
+            display: flex;
+        }
+
+        body[id="scanning"] ~ #message {
+            display: block;
+        }
+
+        #auth-modal button {
+            display: block;
+            margin: 20px auto 0;
+            padding: 12px 40px;
+            font-size: 1em;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid #fff;
+            color: #fff;
+            border-radius: 8px;
+        }
+
+        #auth-modal button:hover {
+            background: #fff;
+            color: #333;
+        }
+
+        #auth-modal #auth-error {
+            color: #f44;
+            margin-top: 15px;
+            display: none;
+        }
+
+        /* Change Event Button */
+        #change-event-btn {
+            position: fixed;
+            top: 12px;
+            right: 50px;
+            font-size: 1.2em;
+            cursor: pointer;
+            z-index: 101;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        #change-event-btn:hover {
+            opacity: 1;
+        }
     </style>
 </head>
-
 <body id="<?php echo !empty($class) ? $class : 'scanning'; ?>">
-    <!-- Location Header (Top) - Clickable to edit, stored in device cookie -->
+
+<?php if ($auth_required && $security === 'login'): ?>
+<div id="auth-modal">
+    <div class="auth-container">
+        <h2>Box Office Login</h2>
+        <p>Enter your box office credentials</p>
+        <input type="email" id="auth-email" placeholder="Email address" autocomplete="off">
+        <input type="password" id="auth-password" placeholder="Password" autocomplete="off">
+        <button id="auth-submit">Login</button>
+        <p id="auth-error">Login failed</p>
+    </div>
+</div>
+<?php elseif ($auth_required): ?>
+<div id="auth-modal">
+    <div class="auth-container">
+        <h2>Event Scanner</h2>
+        <p>Enter the event PIN</p>
+        <input type="text" id="auth-pin" maxlength="12" pattern="[0-9]{5,12}" inputmode="numeric" placeholder="PIN" autocomplete="off">
+        <button id="auth-submit">OK</button>
+        <p id="auth-error">Wrong PIN</p>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($security_authenticated && $security !== 'none' && $security !== 'login'): ?>
+<span id="change-event-btn" onclick="logout()" title="Logout">🔄</span>
+<?php elseif ($security_authenticated && $security === 'login'): ?>
+<span id="change-event-btn" onclick="logout()" title="Logout">🔄</span>
+<?php endif; ?>
+
+<!-- Location Header (Top) - Clickable to edit, stored in device cookie -->
     <div id="location-header" onclick="editLocation()">
         <span id="location-display">Location: <?php echo htmlspecialchars($location); ?></span>
         <input type="text" id="location-input" value="<?php echo htmlspecialchars($location); ?>" placeholder="Enter location" onblur="saveLocation()" onkeydown="handleLocationKey(event)">
@@ -890,7 +1172,16 @@ if ($save && !$debug) {
              */
             function startScanning() {
                 if (!initCodeReader()) return;
-                
+
+                if (!authValidated) {
+                    if (authMode === 'login') {
+                        alert('Please login first');
+                    } else {
+                        alert('Please enter the event PIN first');
+                    }
+                    return;
+                }
+
                 // Don't show loading again if already scanning (for auto-resume)
                 if (!isScanning) {
                     loading.style.display = 'block';
@@ -1030,7 +1321,151 @@ if ($save && !$debug) {
                         stopScanning(false);
                     }
                 }
-                // Note: Auto-resume on visibility change removed to prevent unwanted behavior
+            });
+
+            // Authentication Variables
+            var authMode = '<?php echo $auth_mode; ?>';
+            var authValidated = <?php echo $security_authenticated ? 'true' : 'false'; ?>;
+
+            window.logout = function() {
+                window.location.href = '<?php echo $_SERVER['PHP_SELF']; ?>?logout=1';
+            };
+
+            function showAuthError(msg) {
+                var errorEl = document.getElementById('auth-error');
+                if (errorEl) {
+                    errorEl.textContent = msg;
+                    errorEl.style.display = 'block';
+                }
+            }
+
+            function hideAuthError() {
+                var errorEl = document.getElementById('auth-error');
+                if (errorEl) {
+                    errorEl.style.display = 'none';
+                }
+            }
+
+            function validateLogin(email, password) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', '<?php echo $_SERVER['PHP_SELF']; ?>?auth_action=login&email=' + encodeURIComponent(email) + '&password=' + encodeURIComponent(password), true);
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState === 4) {
+                        if (xhr.status === 200) {
+                            try {
+                                var response = JSON.parse(xhr.responseText);
+                                if (response.success) {
+                                    window.location.reload();
+                                } else {
+                                    showAuthError(response.error || 'Login failed');
+                                    document.getElementById('auth-password').value = '';
+                                    document.getElementById('auth-email').focus();
+                                }
+                            } catch (e) {
+                                showAuthError('Login failed');
+                                document.getElementById('auth-password').value = '';
+                            }
+                        } else {
+                            showAuthError('Login failed');
+                            document.getElementById('auth-password').value = '';
+                        }
+                    }
+                };
+                xhr.send();
+            }
+
+            function validatePin(pin) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', '<?php echo $_SERVER['PHP_SELF']; ?>?auth_action=pin&pin=' + encodeURIComponent(pin), true);
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState === 4) {
+                        if (xhr.status === 200) {
+                            try {
+                                var response = JSON.parse(xhr.responseText);
+                                if (response.success) {
+                                    window.location.reload();
+                                } else {
+                                    showAuthError(response.error || 'Wrong PIN');
+                                    document.getElementById('auth-pin').value = '';
+                                    document.getElementById('auth-pin').focus();
+                                }
+                            } catch (e) {
+                                showAuthError('Wrong PIN');
+                                document.getElementById('auth-pin').value = '';
+                            }
+                        } else {
+                            showAuthError('Wrong PIN');
+                            document.getElementById('auth-pin').value = '';
+                        }
+                    }
+                };
+                xhr.send();
+            }
+
+            // Auth Modal Event Listeners
+            document.addEventListener('DOMContentLoaded', function() {
+                var emailInput = document.getElementById('auth-email');
+                var passwordInput = document.getElementById('auth-password');
+                var pinInput = document.getElementById('auth-pin');
+                var authSubmit = document.getElementById('auth-submit');
+
+                if (authMode === 'login') {
+                    if (emailInput && passwordInput && authSubmit) {
+                        function doLogin() {
+                            var email = emailInput.value.trim();
+                            var password = passwordInput.value;
+                            if (email && password) {
+                                validateLogin(email, password);
+                            } else {
+                                showAuthError('Enter email and password');
+                            }
+                        }
+
+                        passwordInput.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                doLogin();
+                            }
+                        });
+
+                        emailInput.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                passwordInput.focus();
+                            }
+                        });
+
+                        authSubmit.addEventListener('click', doLogin);
+                        emailInput.focus();
+                    }
+                } else {
+                    if (pinInput && authSubmit) {
+                        pinInput.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                authSubmit.click();
+                            }
+                        });
+
+                        pinInput.addEventListener('input', function() {
+                            this.value = this.value.replace(/[^0-9]/g, '');
+                            hideAuthError();
+                        });
+
+authSubmit.addEventListener('click', function() {
+                            var pin = pinInput.value.trim();
+                            if (pin.length >= 5 && pin.length <= 12 && /^\\d+$/.test(pin)) {
+                                validatePin(pin);
+                            } else {
+                                showAuthError('Enter PIN (5-12 digits)');
+                                pinInput.value = '';
+                                pinInput.focus();
+                            }
+                        });
+
+                        pinInput.focus();
+                    }
+                }
             });
 
         })();

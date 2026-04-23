@@ -200,13 +200,37 @@ Sounds are generated using the Web Audio API and work offline after first load.
 4. Check user permissions for database access
 5. Enable debug mode for detailed error messages
 
-## 🔒 Security Considerations
+## 🔒 Security
 
 - All validation happens server-side (client cannot bypass checks)
+- Configurable security modes (none, login, or PIN)
 - Session-based authentication via osConcert
 - Input sanitization for all user-provided data
 - HTTPS required to protect data in transit
 - Location stored in client-side cookie (not sensitive data)
+
+### Security Modes
+
+Configure security by setting the `$security` variable at the top of `scanapp.php`:
+
+| Mode | Setting | Description |
+|------|---------|-------------|
+| None | `$security = 'none';` | No authentication, direct access (for trusted environments) |
+| Login | `$security = 'login';` | Box office login with email/password (country_id = 999 required) |
+| PIN | `$security = '12345';` | 5-12 digit PIN (any number of 5-12 digits) |
+
+#### Login Mode (Box Office)
+
+1. **Enter credentials**: Email and password of a box office account
+2. **Validation**: Checks `entry_country_id = 999` in address_book
+3. **Session persists**: Login remains valid until browser/tab is closed
+4. **Logout**: Click the 🔄 icon to log out
+
+#### PIN Mode
+
+1. **Enter PIN**: 5-12 digit static PIN configured in scanapp.php
+2. **Session persists**: PIN remains valid until browser/tab is closed
+3. **Logout**: Click the 🔄 icon to log out
 
 ## 📊 Performance Tips
 
@@ -228,7 +252,21 @@ The app integrates seamlessly with existing osConcert infrastructure:
 
 ## 📝 Version History
 
-### Version 1.3.0 - High-Impact Optimizations (Current)
+### Version 1.5.0 - Configurable Security Modes
+- Added three security modes: `none`, `login`, and numeric PIN
+- **none**: Direct access without authentication (trusted environments)
+- **login**: Box office login with email/password (checks country_id = 999)
+- **PIN**: 5-12 digit static PIN configured in scanapp.php
+- Unified authentication UI for both login and PIN modes
+- Configurable via `$security` variable at top of scanapp.php
+
+### Version 1.4.0 - PIN Event Access Control
+- Added PIN authentication (5-12 digits) for access control
+- Full-screen PIN modal on first access
+- Change event button (🔄) to switch events
+- Session-based PIN validation (expires when browser closes)
+
+### Version 1.3.0 - High-Impact Optimizations
 **PHP Backend:**
 - Single-query ticket validation (eliminated redundant DB round-trip)
 - Cached type conversions (int casts)
