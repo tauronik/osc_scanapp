@@ -1454,7 +1454,7 @@ $auth_mode = ($security === 'login') ? 'login' : 'pin';
 
 authSubmit.addEventListener('click', function() {
                             var pin = pinInput.value.trim();
-                            if (pin.length >= 5 && pin.length <= 12 && /^\\d+$/.test(pin)) {
+                            if (pin.length >= 5 && pin.length <= 12 && /^\d+$/.test(pin)) {
                                 validatePin(pin);
                             } else {
                                 showAuthError('Enter PIN (5-12 digits)');
