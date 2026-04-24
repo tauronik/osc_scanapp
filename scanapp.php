@@ -46,8 +46,22 @@ $debug = false; // Set to true for debug mode, preserved from original scanner.p
 /** SECURITY MODE **/
 // 'none'    - No security (direct access, for trusted environments)
 // 'login'   - Box office login required (email + password with country_id = 999)
-// Any other value - Treated as PIN (5-12 digits) for access
+// PIN value - 5-12 digits (truncated to 12 if longer, invalid chars default to 'login')
 $security = 'login';
+if (isset($security)) {
+    $security = trim((string)$security);
+    if ($security === '') {
+        $security = 'login';
+    } elseif ($security !== 'none' && $security !== 'login') {
+        if (preg_match('/^\d+$/', $security)) {
+            if (strlen($security) > 12) {
+                $security = substr($security, 0, 12);
+            }
+        } else {
+            $security = 'login';
+        }
+    }
+}
 /** SECURITY MODE **/
 
 // Initialize response variables
