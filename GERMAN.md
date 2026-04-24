@@ -126,6 +126,11 @@ Setzen Sie `$debug = true;` in der PHP-Sektion, um detaillierte Fehlermeldungen 
 
 ## 📝 Versionshistorie
 
+### Version 1.5.1 - Sicherheitsvalidierung
+- `$security` Wert-Validierung: leer/invalid wird zu `login`
+- PIN wird auf 12 Stellen gekürzt falls länger
+- "DO NOT CHANGE" Trennlinie nach `$security` Definition hinzugefügt
+
 ### Version 1.5 - Konfigurierbare Sicherheitsmodi
 - Drei Sicherheitsmodi: `none`, `login` und numerische PIN
 - **none**: Direktzugriff ohne Authentifizierung (vertrauenswürdige Umgebungen)

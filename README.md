@@ -252,6 +252,11 @@ The app integrates seamlessly with existing osConcert infrastructure:
 
 ## 📝 Version History
 
+### Version 1.5.1 - Security Validation
+- Validate `$security` value: empty/invalid defaults to `login`
+- Truncate PIN to 12 digits if longer
+- Added "do not change below" separator after `$security` definition
+
 ### Version 1.5.0 - Configurable Security Modes
 - Added three security modes: `none`, `login`, and numeric PIN
 - **none**: Direct access without authentication (trusted environments)
@@ -319,7 +324,7 @@ For issues related to:
 - **osConcert integration**: Contact osConcert support
 - **Browser compatibility**: Check browser documentation
 - **ZXing library**: [GitHub Issues](https://github.com/zxing-js/library/issues)
-- **This scanner app**: Check `QWEN.md` for development notes
+- **This scanner app**: Check `GERMAN.md` for development notes
 
 ## 📄 License
 

@@ -2,7 +2,7 @@
 /*
     scanapp.php - HTML5 Camera-based Ticket Scanner for osConcert
     @author: m.schatz@tauronik.de
-    @version: 1.5.0
+    @version: 1.5.1
 
     This is a mobile-first ticket scanning application that uses:
     - HTML5 getUserMedia API for camera access
@@ -12,7 +12,7 @@
     Copyright (c) 2009-2025 osConcert
     Released under the GNU General Public License
 
-    FEATURES (v1.5.0):
+    FEATURES (v1.5.1):
     - Configurable security modes: none, login, or PIN
     - Box office login authentication (country_id = 999)
     - Static PIN authentication (5-12 digits)
@@ -48,6 +48,7 @@ $debug = false; // Set to true for debug mode, preserved from original scanner.p
 // 'login'   - Box office login required (email + password with country_id = 999)
 // PIN value - 5-12 digits (truncated to 12 if longer, invalid chars default to 'login')
 $security = 'login';
+/*** DO NOT CHANGE ANYTHING BELOW THIS LINE ***/
 if (isset($security)) {
     $security = trim((string)$security);
     if ($security === '') {

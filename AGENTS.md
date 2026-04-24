@@ -3,7 +3,7 @@
 ## Repo Structure
 - `scanapp.php` - Single-file HTML5 ticket scanner (main application)
 - `includes/application_top.php` - osConcert bootstrap (required dependency)
-- `QWEN.md` - Development notes (German)
+- `GERMAN.md` - Development notes (German)
 - `README.md` - User documentation
 
 ## Security Modes
