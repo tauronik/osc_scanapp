@@ -252,7 +252,12 @@ The app integrates seamlessly with existing osConcert infrastructure:
 
 ## 📝 Version History
 
-### Version 1.5.1 - Security Validation
+### Version 1.5.3 - Enhanced Login Security
+- Login accepts email OR username
+- Input sanitization: email validated via FILTER, username restricted to alphanumeric + underscore/hyphen
+
+### Version 1.5.2 - Username Login Support
+- Box office login now accepts email or username
 - Validate `$security` value: empty/invalid defaults to `login`
 - Truncate PIN to 12 digits if longer
 - Added "do not change below" separator after `$security` definition

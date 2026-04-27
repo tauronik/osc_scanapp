@@ -12,7 +12,7 @@ Configure via `$security` variable at top of scanapp.php:
 | Mode | `$security` value | Authentication |
 |------|-------------------|---------------|
 | None | `'none'` | No authentication (trusted environments) |
-| Login | `'login'` | Box office account (email + password, country_id = 999) |
+| Login | `'login'` | Box office account (email or username + password, country_id = 999) |
 | PIN | Any 5-12 digit number | Static PIN configured in scanapp.php |
 
 ## Key Integration Points

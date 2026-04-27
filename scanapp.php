@@ -2,7 +2,7 @@
 /*
     scanapp.php - HTML5 Camera-based Ticket Scanner for osConcert
     @author: m.schatz@tauronik.de
-    @version: 1.5.2
+    @version: 1.5.3
 
     This is a mobile-first ticket scanning application that uses:
     - HTML5 getUserMedia API for camera access
@@ -12,11 +12,8 @@
     Copyright (c) 2009-2025 osConcert
     Released under the GNU General Public License
 
-    FEATURES (v1.5.2):
-    - Added email OR username login
-
-    FEATURES (v1.5.2):
-    - Configurable security modes: none, login, or PIN
+    FEATURES (v1.5.3):
+    - Enhanced login: accepts email OR username with sanitization
     - Box office login authentication (country_id = 999)
     - Static PIN authentication (5-12 digits)
     - AJAX authentication with session management
@@ -332,13 +329,26 @@ if (isset($_GET['auth_action'])) {
     header('Content-Type: application/json');
 
 if ($_GET['auth_action'] === 'login') {
-    // Box office login by email OR username
     $login = isset($_GET['email']) ? trim($_GET['email']) : '';
     $password = isset($_GET['password']) ? trim($_GET['password']) : '';
 
     if ($login === '' || $password === '') {
-        echo json_encode(['success' => false, 'error' => 'Login and password required']);
+        echo json_encode(['success' => false, 'error' => 'Email/username and password required']);
         exit;
+    }
+
+    if (strpos($login, '@') !== false) {
+        $login = filter_var($login, FILTER_SANITIZE_EMAIL);
+        if (!$login || !filter_var($login, FILTER_VALIDATE_EMAIL)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid email format']);
+            exit;
+        }
+    } else {
+        $login = preg_replace('/[^a-zA-Z0-9_-]/', '', $login);
+        if (strlen($login) < 3 || strlen($login) > 50) {
+            echo json_encode(['success' => false, 'error' => 'Invalid username format']);
+            exit;
+        }
     }
 
     $login_sql = tep_db_input($login);
