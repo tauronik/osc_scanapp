@@ -2,7 +2,7 @@
 /*
     scanapp.php - HTML5 Camera-based Ticket Scanner for osConcert
     @author: m.schatz@tauronik.de
-    @version: 1.5.1
+    @version: 1.5.2
 
     This is a mobile-first ticket scanning application that uses:
     - HTML5 getUserMedia API for camera access
@@ -12,7 +12,10 @@
     Copyright (c) 2009-2025 osConcert
     Released under the GNU General Public License
 
-    FEATURES (v1.5.1):
+    FEATURES (v1.5.2):
+    - Added email OR username login
+
+    FEATURES (v1.5.2):
     - Configurable security modes: none, login, or PIN
     - Box office login authentication (country_id = 999)
     - Static PIN authentication (5-12 digits)
@@ -328,52 +331,59 @@ if ($save && !$debug) {
 if (isset($_GET['auth_action'])) {
     header('Content-Type: application/json');
 
-    if ($_GET['auth_action'] === 'login') {
-        // Box office login
-        $email = filter_input(INPUT_GET, 'email', FILTER_SANITIZE_EMAIL);
-        $password = filter_input(INPUT_GET, 'password', FILTER_SANITIZE_STRING);
+if ($_GET['auth_action'] === 'login') {
+    // Box office login by email OR username
+    $login = isset($_GET['email']) ? trim($_GET['email']) : '';
+    $password = isset($_GET['password']) ? trim($_GET['password']) : '';
 
-        if (!$email || !$password) {
-            echo json_encode(['success' => false, 'error' => 'Email and password required']);
-            exit;
-        }
-
-        $check_customer_query = tep_db_query("
-            SELECT customers_id, customers_password, encryption_style
-            FROM " . TABLE_CUSTOMERS . "
-            WHERE is_blocked = 'N' AND customers_email_address = '" . tep_db_input($email) . "'
-            LIMIT 1
-        ");
-
-        if (tep_db_num_rows($check_customer_query) === 0) {
-            echo json_encode(['success' => false, 'error' => 'Login failed']);
-            exit;
-        }
-
-        $check_customer = tep_db_fetch_array($check_customer_query);
-
-        if (!tep_validate_password($password, $check_customer['customers_password'], $check_customer['encryption_style'])) {
-            echo json_encode(['success' => false, 'error' => 'Login failed']);
-            exit;
-        }
-
-        // Check box office access (country_id = 999)
-        $check_country_query = tep_db_query("
-            SELECT 1 FROM address_book
-            WHERE customers_id = '" . (int)$check_customer['customers_id'] . "'
-            AND entry_country_id = 999
-            LIMIT 1
-        ");
-
-        if (tep_db_num_rows($check_country_query) === 0) {
-            echo json_encode(['success' => false, 'error' => 'Access denied']);
-            exit;
-        }
-
-        $_SESSION['customer_id'] = (int)$check_customer['customers_id'];
-        echo json_encode(['success' => true, 'type' => 'login']);
+    if ($login === '' || $password === '') {
+        echo json_encode(['success' => false, 'error' => 'Login and password required']);
         exit;
     }
+
+    $login_sql = tep_db_input($login);
+
+    $check_customer_query = tep_db_query("
+        SELECT customers_id, customers_password, encryption_style
+        FROM " . TABLE_CUSTOMERS . "
+        WHERE is_blocked = 'N'
+        AND (
+            customers_email_address = '" . $login_sql . "'
+            OR customers_username = '" . $login_sql . "'
+        )
+        LIMIT 1
+    ");
+
+    if (tep_db_num_rows($check_customer_query) === 0) {
+        echo json_encode(['success' => false, 'error' => 'Login failed']);
+        exit;
+    }
+
+    $check_customer = tep_db_fetch_array($check_customer_query);
+
+    if (!tep_validate_password($password, $check_customer['customers_password'], $check_customer['encryption_style'])) {
+        echo json_encode(['success' => false, 'error' => 'Login failed']);
+        exit;
+    }
+
+    // Check box office access (country_id = 999)
+    $check_country_query = tep_db_query("
+        SELECT 1 FROM address_book
+        WHERE customers_id = '" . (int)$check_customer['customers_id'] . "'
+        AND entry_country_id = 999
+        LIMIT 1
+    ");
+
+    if (tep_db_num_rows($check_country_query) === 0) {
+        echo json_encode(['success' => false, 'error' => 'Access denied']);
+        exit;
+    }
+
+    $_SESSION['customer_id'] = (int)$check_customer['customers_id'];
+
+    echo json_encode(['success' => true, 'type' => 'login']);
+    exit;
+}
 
     if ($_GET['auth_action'] === 'pin') {
         // PIN validation - compare against configured security value
